@@ -10,28 +10,23 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:xml/xml.dart';
 import 'package:yaml/yaml.dart';
 
 void main() => runApp(const UniversalConverterApp());
 
 class UniversalConverterApp extends StatelessWidget {
   const UniversalConverterApp({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Universal Converter',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      home: const ConverterHome(),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Universal Converter',
+        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+        home: const ConverterHome(),
+      );
 }
 
 class ConverterHome extends StatefulWidget {
   const ConverterHome({super.key});
-
   @override
   State<ConverterHome> createState() => _ConverterHomeState();
 }
@@ -43,13 +38,12 @@ class _ConverterHomeState extends State<ConverterHome> {
   bool _busy = false;
   double _progress = 0;
 
-  static const imageTargets = ['PNG', 'JPG', 'WEBP', 'BMP', 'GIF'];
+  static const imageTargets = ['PNG', 'JPG', 'BMP', 'GIF'];
   static const textTargets = ['TXT', 'MD', 'JSON', 'CSV', 'YAML', 'XML'];
 
   Future<void> _pickFiles() async {
-    final result = await FilePicker.platform.pickFiles(allowMultiple: true, withData: false);
-    if (result == null) return;
-    setState(() => _files.addAll(result.files));
+    final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    if (result != null) setState(() => _files.addAll(result.files));
   }
 
   Future<Directory> _outputDir() async {
@@ -60,8 +54,8 @@ class _ConverterHomeState extends State<ConverterHome> {
   }
 
   Future<File> _uniqueFile(Directory dir, String name) async {
-    var file = File(p.join(dir.path, name));
-    if (!file.existsSync()) return file;
+    final original = File(p.join(dir.path, name));
+    if (!original.existsSync()) return original;
     final ext = p.extension(name);
     final stem = p.basenameWithoutExtension(name);
     var i = 1;
@@ -72,17 +66,17 @@ class _ConverterHomeState extends State<ConverterHome> {
   Future<void> _convert() async {
     if (_files.isEmpty) return;
     setState(() { _busy = true; _progress = 0; });
-    final out = await _outputDir();
     try {
+      final out = await _outputDir();
       for (var i = 0; i < _files.length; i++) {
         final input = _files[i];
         final path = input.path;
         if (path == null) throw Exception('无法读取 ${input.name}');
         final ext = p.extension(path).toLowerCase().replaceFirst('.', '');
         final bytes = await File(path).readAsBytes();
-        File output;
+        late File output;
         if (imageTargets.map((e) => e.toLowerCase()).contains(_target.toLowerCase()) &&
-            ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'].contains(ext)) {
+            ['png', 'jpg', 'jpeg', 'bmp', 'gif'].contains(ext)) {
           output = await _convertImage(bytes, input.name, _target, out);
         } else if (textTargets.map((e) => e.toLowerCase()).contains(_target.toLowerCase()) &&
             ['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'xml'].contains(ext)) {
@@ -90,14 +84,12 @@ class _ConverterHomeState extends State<ConverterHome> {
         } else if (_target == 'ZIP') {
           output = await _makeZip(bytes, input.name, out);
         } else {
-          throw Exception('${input.name}: 当前手机版暂不支持 $ext → $_target，本地转换不会上传文件。');
+          throw Exception('${input.name}: 当前手机版暂不支持 $ext → $_target；文件不会上传。');
         }
         _history.insert(0, '${input.name} → ${p.basename(output.path)}');
         setState(() => _progress = (i + 1) / _files.length);
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('转换完成，文件保存在应用文档目录。')));
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('转换完成。')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     } finally {
@@ -108,11 +100,10 @@ class _ConverterHomeState extends State<ConverterHome> {
   Future<File> _convertImage(Uint8List bytes, String name, String target, Directory dir) async {
     final decoded = img.decodeImage(bytes);
     if (decoded == null) throw Exception('$name 不是可识别的图片。');
-    final format = target.toLowerCase() == 'jpg' ? 'jpg' : target.toLowerCase();
+    final format = target.toLowerCase();
     final encoded = switch (format) {
       'png' => img.encodePng(decoded),
       'jpg' => img.encodeJpg(decoded, quality: 92),
-      'webp' => img.encodeJpg(decoded, quality: 92),
       'bmp' => img.encodeBmp(decoded),
       'gif' => img.encodeGif(decoded),
       _ => throw Exception('不支持图片格式 $target'),
@@ -126,22 +117,34 @@ class _ConverterHomeState extends State<ConverterHome> {
     final text = utf8.decode(bytes, allowMalformed: true);
     dynamic data;
     final normalized = source == 'yml' ? 'yaml' : source;
-    if (normalized == 'json') data = jsonDecode(text);
-    else if (normalized == 'csv') data = const CsvToListConverter().convert(text);
-    else if (normalized == 'yaml') data = _yamlToJson(loadYaml(text));
-    else if (normalized == 'xml') data = {'xml': text};
-    else data = text;
+    if (normalized == 'json') {
+      data = jsonDecode(text);
+    } else if (normalized == 'csv') {
+      data = const CsvToListConverter().convert(text);
+    } else if (normalized == 'yaml') {
+      data = _yamlToJson(loadYaml(text));
+    } else if (normalized == 'xml') {
+      data = {'xml': text};
+    } else {
+      data = text;
+    }
 
-    String result;
     final t = target.toLowerCase();
-    if (t == 'txt' || t == 'md') result = data is String ? data : const JsonEncoder.withIndent('  ').convert(data);
-    else if (t == 'json') result = const JsonEncoder.withIndent('  ').convert(data);
-    else if (t == 'csv') {
-      if (data is! List) throw Exception('只有二维列表数据才能导出 CSV。');
+    final String result;
+    if (t == 'txt' || t == 'md') {
+      result = data is String ? data : const JsonEncoder.withIndent('  ').convert(data);
+    } else if (t == 'json') {
+      result = const JsonEncoder.withIndent('  ').convert(data);
+    } else if (t == 'csv') {
+      if (data is! List) throw Exception('只有列表数据才能导出 CSV。');
       result = const ListToCsvConverter().convert(data);
-    } else if (t == 'yaml') result = _simpleYaml(data);
-    else if (t == 'xml') result = _simpleXml(data);
-    else throw Exception('不支持文本格式 $target');
+    } else if (t == 'yaml') {
+      result = _simpleYaml(data);
+    } else if (t == 'xml') {
+      result = _simpleXml(data);
+    } else {
+      throw Exception('不支持文本格式 $target');
+    }
     final output = await _uniqueFile(dir, '${p.basenameWithoutExtension(name)}.$t');
     await output.writeAsString(result, flush: true);
     return output;
@@ -162,14 +165,15 @@ class _ConverterHomeState extends State<ConverterHome> {
   }
 
   String _simpleXml(dynamic data) {
-    final builder = XmlBuilder()..processing('xml', 'version="1.0"')..element('data', nest: () => _xmlNest(data));
-    return builder.buildDocument().toXmlString(pretty: true);
-  }
-
-  void _xmlNest(dynamic value) {
-    if (value is Map) {
-      for (final e in value.entries) XmlBuilder();
+    String node(String key, dynamic value) {
+      final safeKey = key.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+      if (value is Map) return '<$safeKey>${value.entries.map((e) => node(e.key.toString(), e.value)).join()}</$safeKey>';
+      if (value is List) return '<$safeKey>${value.map((v) => node('item', v)).join()}</$safeKey>';
+      final escaped = const HtmlEscape(HtmlEscapeMode.element).convert('$value');
+      return '<$safeKey>$escaped</$safeKey>';
     }
+    if (data is Map) return '<?xml version="1.0" encoding="UTF-8"?>\n<data>${data.entries.map((e) => node(e.key.toString(), e.value)).join()}</data>';
+    return '<?xml version="1.0" encoding="UTF-8"?>\n<data>${node('value', data)}</data>';
   }
 
   Future<File> _makeZip(Uint8List bytes, String name, Directory dir) async {
@@ -181,7 +185,6 @@ class _ConverterHomeState extends State<ConverterHome> {
   }
 
   Future<void> _shareLatest() async {
-    if (_history.isEmpty) return;
     final dir = await _outputDir();
     final files = dir.listSync().whereType<File>().take(5).map((f) => XFile(f.path)).toList();
     if (files.isNotEmpty) await SharePlus.instance.share(ShareParams(files: files, text: 'Universal Converter 转换结果'));
@@ -195,20 +198,14 @@ class _ConverterHomeState extends State<ConverterHome> {
       body: ListView(padding: const EdgeInsets.all(16), children: [
         FilledButton.icon(onPressed: _busy ? null : _pickFiles, icon: const Icon(Icons.add), label: const Text('选择文件')),
         const SizedBox(height: 12),
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('目标格式', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(value: _target, items: targets.map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(), onChanged: _busy ? null : (v) => setState(() => _target = v!)),
-        ]))),
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: DropdownButtonFormField<String>(value: _target, items: targets.map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(), onChanged: _busy ? null : (v) => setState(() => _target = v!)))),
         const SizedBox(height: 12),
         ..._files.map((f) => ListTile(leading: const Icon(Icons.insert_drive_file), title: Text(f.name), trailing: IconButton(onPressed: _busy ? null : () => setState(() => _files.remove(f)), icon: const Icon(Icons.close)))),
-        if (_busy) ...[const SizedBox(height: 12), LinearProgressIndicator(value: _progress), const SizedBox(height: 8), Text('${(_progress * 100).round()}%')],
+        if (_busy) ...[LinearProgressIndicator(value: _progress), const SizedBox(height: 8), Text('${(_progress * 100).round()}%')],
         const SizedBox(height: 12),
         FilledButton.icon(onPressed: _busy || _files.isEmpty ? null : _convert, icon: const Icon(Icons.transform), label: const Text('开始转换')),
         const SizedBox(height: 24),
         Text('本地转换历史', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        if (_history.isEmpty) const Text('暂无记录'),
         ..._history.map((h) => ListTile(dense: true, leading: const Icon(Icons.check_circle_outline), title: Text(h))),
       ]),
     );
