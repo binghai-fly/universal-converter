@@ -13,6 +13,21 @@
 
 > “市面上大部分格式”不代表所有格式都能无损互转。Office 和音视频格式由 LibreOffice / FFmpeg 提供能力，复杂 PDF、受 DRM 保护的媒体、专业设计文件等仍可能需要专用软件。
 
+## 3.0 Windows Office 依赖自动化
+
+Windows 版现在会自动检测 LibreOffice，不要求用户手动把 `soffice` 加入 PATH。
+
+如果未安装 LibreOffice，程序提供：
+
+- **重新检测**：搜索 PATH、Program Files、LocalAppData 和常见用户安装目录
+- **自动安装 LibreOffice**：在 Windows 上调用 WinGet 安装 `TheDocumentFoundation.LibreOffice`；安装过程在后台线程执行，避免冻结界面
+- **官方安装页**：如果电脑没有 WinGet，直接打开 LibreOffice 官方下载页面
+- Office 转换失败时，会给出明确的依赖提示
+
+### 注意
+
+自动安装需要 Windows 的 **WinGet / App Installer**。程序不会把 LibreOffice 二进制文件打进 EXE，因此不会因为捆绑第三方组件而让 EXE 体积大幅增加。首次安装仍需要网络连接，并可能受到 Windows 管理员策略限制。
+
 ## 2.0 改进
 
 - 支持**拖拽添加文件**
@@ -46,27 +61,32 @@ python app.py
 
 ### 外部依赖
 
-- **LibreOffice**：Office 格式互转需要，并将 `soffice` 加入 PATH。
+- **LibreOffice**：Office 格式互转需要。Windows 版会自动检测并可通过 WinGet 一键安装。
 - **FFmpeg**：音视频转换需要，并将 `ffmpeg` 加入 PATH。
 
 ## Windows EXE
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --windowed --name UniversalConverter app.py
+pyinstaller --noconfirm --windowed --name UniversalConverter app_v3.py
 ```
+
+项目的 GitHub Actions 会在 `v*.*.*` Tag 上自动构建 Windows x64 ZIP 并发布 GitHub Release。
 
 ## 项目结构
 
 ```text
 universal-converter/
 ├─ app.py
+├─ app_v3.py
 ├─ converters/
 │  ├─ __init__.py
-│  └─ core.py
+│  ├─ core.py
+│  └─ dependencies.py
 ├─ tests/
 │  └─ test_core.py
 ├─ .github/workflows/test.yml
+├─ .github/workflows/release.yml
 ├─ requirements.txt
 └─ README.md
 ```
@@ -79,3 +99,4 @@ universal-converter/
 4. Office → PDF 的专用预览和错误诊断
 5. 转换历史、日志和取消任务
 6. 插件式 converter adapter，方便加入 CAD、电子书等专业格式
+7. iPhone + Android 本地转换 App
