@@ -53,6 +53,31 @@ class DropList(QListWidget):
         self.setAcceptDrops(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setMinimumHeight(180)
+        # QListWidget does not provide setPlaceholderText().
+        # Keep the empty state clear with a normal list item instead.
+        self._placeholder = "将文件拖到这里，或点击“添加文件”"
+        self._update_placeholder()
+
+    def _update_placeholder(self):
+        if self.count() == 0:
+            self.addItem(self._placeholder)
+            item = self.item(0)
+            item.setFlags(Qt.NoItemFlags)
+        elif self.count() == 1 and self.item(0).text() == self._placeholder:
+            self.takeItem(0)
+
+    def add_file(self, path: str):
+        self._update_placeholder()
+        self.addItem(path)
+
+    def remove_selected_files(self):
+        for item in self.selectedItems():
+            self.takeItem(self.row(item))
+        self._update_placeholder()
+
+    def clear_files(self):
+        super().clear()
+        self._update_placeholder()
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -71,7 +96,6 @@ class Worker(QThread):
     def __init__(self, jobs):
         super().__init__()
         self.jobs = jobs
-        self.cancelled = False
 
     def run(self):
         with ThreadPoolExecutor(max_workers=min(4, max(1, len(self.jobs)))) as pool:
@@ -95,7 +119,6 @@ class App(QWidget):
         self.setAcceptDrops(True)
         self.worker = None
         self.jobs = []
-        self.history = []
         self.build_ui()
 
     def build_ui(self):
@@ -111,7 +134,6 @@ class App(QWidget):
         bl = QVBoxLayout(box)
         self.files = DropList()
         self.files.files_dropped.connect(self.add_paths)
-        self.files.setPlaceholderText("将文件拖到这里，或点击“添加文件”")
         bl.addWidget(self.files)
         buttons = QHBoxLayout()
         add = QPushButton("添加文件")
@@ -119,7 +141,7 @@ class App(QWidget):
         remove = QPushButton("移除选中")
         remove.clicked.connect(self.remove_selected)
         clear = QPushButton("清空")
-        clear.clicked.connect(self.files.clear)
+        clear.clicked.connect(self.files.clear_files)
         buttons.addWidget(add)
         buttons.addWidget(remove)
         buttons.addWidget(clear)
@@ -175,16 +197,15 @@ class App(QWidget):
         self.add_paths(paths)
 
     def add_paths(self, paths):
-        existing = {self.files.item(i).text() for i in range(self.files.count())}
+        existing = {self.files.item(i).text() for i in range(self.files.count()) if self.files.item(i).flags() != Qt.NoItemFlags}
         for p in paths:
             if p and Path(p).is_file() and p not in existing:
-                self.files.addItem(p)
+                self.files.add_file(p)
                 existing.add(p)
-        self.status.setText(f"已添加 {self.files.count()} 个文件")
+        self.status.setText(f"已添加 {sum(1 for i in range(self.files.count()) if self.files.item(i).flags() != Qt.NoItemFlags)} 个文件")
 
     def remove_selected(self):
-        for item in self.files.selectedItems():
-            self.files.takeItem(self.files.row(item))
+        self.files.remove_selected_files()
 
     def pick_output(self):
         path = QFileDialog.getExistingDirectory(self, "选择输出目录")
@@ -193,7 +214,8 @@ class App(QWidget):
             self.output_label.setText(f"输出目录：{self.output_dir}")
 
     def start(self):
-        if self.files.count() == 0:
+        file_items = [self.files.item(i).text() for i in range(self.files.count()) if self.files.item(i).flags() != Qt.NoItemFlags]
+        if not file_items:
             QMessageBox.warning(self, "提示", "请先添加文件。")
             return
         if not self.output_dir:
@@ -203,8 +225,8 @@ class App(QWidget):
 
         target = self.format.currentData()
         jobs = []
-        for i in range(self.files.count()):
-            src = Path(self.files.item(i).text())
+        for path in file_items:
+            src = Path(path)
             if suffix(src) == target and not self.same_ext.isChecked():
                 self.add_history("跳过", src.name, "输入和输出格式相同")
                 continue
