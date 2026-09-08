@@ -3,6 +3,7 @@
 The original app.py is kept for compatibility. Run this file for the 3.0 UI.
 """
 import sys
+import webbrowser
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -16,11 +17,16 @@ from PySide6.QtWidgets import (
 )
 
 from converters import convert
+from converters.dependencies import (
+    LIBREOFFICE_DOWNLOAD_URL,
+    find_soffice,
+    install_libreoffice_windows,
+)
 
 FORMATS = [
     ("文本 / 数据", ["txt", "md", "csv", "json", "yaml", "xml"]),
     ("图片", ["png", "jpg", "jpeg", "webp", "bmp", "tiff", "gif"]),
-    ("文档 / PDF", ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"]),
+    ("文档 / PDF", ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf"]),
     ("音频", ["mp3", "wav", "flac", "aac", "ogg", "m4a"]),
     ("视频", ["mp4", "mkv", "avi", "mov", "webm", "mpeg", "mpg"]),
     ("压缩包", ["zip", "tar", "tar.gz", "tgz", "tar.bz2", "tar.xz"]),
@@ -53,8 +59,6 @@ class DropList(QListWidget):
         self.setAcceptDrops(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setMinimumHeight(180)
-        # QListWidget does not provide setPlaceholderText().
-        # Keep the empty state clear with a normal list item instead.
         self._placeholder = "将文件拖到这里，或点击“添加文件”"
         self._update_placeholder()
 
@@ -111,15 +115,25 @@ class Worker(QThread):
         self.all_done.emit()
 
 
+class OfficeInstallWorker(QThread):
+    finished = Signal(bool, str)
+
+    def run(self):
+        ok, message = install_libreoffice_windows()
+        self.finished.emit(ok, message)
+
+
 class App(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Universal Converter 3.0")
-        self.resize(920, 680)
+        self.resize(920, 740)
         self.setAcceptDrops(True)
         self.worker = None
+        self.office_worker = None
         self.jobs = []
         self.build_ui()
+        self.refresh_office_status()
 
     def build_ui(self):
         root = QVBoxLayout(self)
@@ -129,6 +143,21 @@ class App(QWidget):
         sub = QLabel("批量转换 · 拖拽导入 · 自动避免覆盖 · 转换历史")
         sub.setObjectName("subtitle")
         root.addWidget(sub)
+
+        office_box = QGroupBox("Office 依赖")
+        office_layout = QHBoxLayout(office_box)
+        self.office_status = QLabel("正在检测 LibreOffice…")
+        office_layout.addWidget(self.office_status, 1)
+        check_office = QPushButton("重新检测")
+        check_office.clicked.connect(self.refresh_office_status)
+        office_layout.addWidget(check_office)
+        self.install_office_btn = QPushButton("自动安装 LibreOffice")
+        self.install_office_btn.clicked.connect(self.install_office)
+        office_layout.addWidget(self.install_office_btn)
+        manual_office = QPushButton("官方安装页")
+        manual_office.clicked.connect(lambda: webbrowser.open(LIBREOFFICE_DOWNLOAD_URL))
+        office_layout.addWidget(manual_office)
+        root.addWidget(office_box)
 
         box = QGroupBox("文件")
         bl = QVBoxLayout(box)
@@ -192,6 +221,47 @@ class App(QWidget):
         hl.addWidget(self.history_table)
         root.addWidget(hist_box)
 
+    def refresh_office_status(self):
+        path = find_soffice()
+        if path:
+            self.office_status.setText(f"✓ LibreOffice 已就绪：{path}")
+            self.install_office_btn.setEnabled(False)
+        else:
+            self.office_status.setText("⚠ 未检测到 LibreOffice；Office 转换不可用")
+            self.install_office_btn.setEnabled(True)
+
+    def install_office(self):
+        if sys.platform != "win32":
+            QMessageBox.information(self, "Windows 功能", "自动安装目前只针对 Windows。你可以使用“官方安装页”手动安装。")
+            return
+        answer = QMessageBox.question(
+            self,
+            "自动安装 LibreOffice",
+            "程序将调用 Windows WinGet 安装 LibreOffice。是否继续？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.install_office_btn.setEnabled(False)
+        self.status.setText("正在安装 LibreOffice，请稍候…")
+        self.office_worker = OfficeInstallWorker()
+        self.office_worker.finished.connect(self.office_install_done)
+        self.office_worker.start()
+
+    def office_install_done(self, ok, message):
+        self.refresh_office_status()
+        if ok:
+            self.status.setText("LibreOffice 已安装，可以进行 Office 转换。")
+            QMessageBox.information(self, "安装完成", message)
+        else:
+            self.status.setText("LibreOffice 自动安装未完成。")
+            QMessageBox.warning(
+                self,
+                "安装未完成",
+                f"{message}\n\n你也可以点击“官方安装页”手动安装 LibreOffice。",
+            )
+
     def pick_files(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "选择文件")
         self.add_paths(paths)
@@ -202,7 +272,8 @@ class App(QWidget):
             if p and Path(p).is_file() and p not in existing:
                 self.files.add_file(p)
                 existing.add(p)
-        self.status.setText(f"已添加 {sum(1 for i in range(self.files.count()) if self.files.item(i).flags() != Qt.NoItemFlags)} 个文件")
+        count = sum(1 for i in range(self.files.count()) if self.files.item(i).flags() != Qt.NoItemFlags)
+        self.status.setText(f"已添加 {count} 个文件")
 
     def remove_selected(self):
         self.files.remove_selected_files()
@@ -272,6 +343,10 @@ class App(QWidget):
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
             QMessageBox.warning(self, "正在转换", "请等待当前任务完成后再退出。")
+            event.ignore()
+            return
+        if self.office_worker and self.office_worker.isRunning():
+            QMessageBox.warning(self, "正在安装", "请等待 LibreOffice 安装完成后再退出。")
             event.ignore()
             return
         event.accept()
