@@ -1,0 +1,59 @@
+name: Build Mobile Apps
+
+on:
+  push:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Flutter platform files
+        working-directory: mobile
+        run: flutter create --platforms=android .
+      - name: Get packages
+        working-directory: mobile
+        run: flutter pub get
+      - name: Analyze
+        working-directory: mobile
+        run: flutter analyze
+      - name: Build APK
+        working-directory: mobile
+        run: flutter build apk --release
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniversalConverter-Android
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS archive
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Flutter platform files
+        working-directory: mobile
+        run: flutter create --platforms=ios .
+      - name: Get packages
+        working-directory: mobile
+        run: flutter pub get
+      - name: Analyze
+        working-directory: mobile
+        run: flutter analyze
+      - name: Build iOS (no signing)
+        working-directory: mobile
+        run: flutter build ios --release --no-codesign
