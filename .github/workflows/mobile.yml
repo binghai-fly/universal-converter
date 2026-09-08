@@ -20,6 +20,9 @@ jobs:
       - name: Generate Flutter platform files
         working-directory: mobile
         run: flutter create --platforms=android .
+      - name: Remove generated template test
+        working-directory: mobile
+        run: rm -f test/widget_test.dart
       - name: Get packages
         working-directory: mobile
         run: flutter pub get
@@ -48,6 +51,9 @@ jobs:
       - name: Generate Flutter platform files
         working-directory: mobile
         run: flutter create --platforms=ios .
+      - name: Remove generated template test
+        working-directory: mobile
+        run: rm -f test/widget_test.dart
       - name: Get packages
         working-directory: mobile
         run: flutter pub get
