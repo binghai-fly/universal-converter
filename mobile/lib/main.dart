@@ -137,7 +137,11 @@ class _ConverterHomeState extends State<ConverterHome> {
       result = const JsonEncoder.withIndent('  ').convert(data);
     } else if (t == 'csv') {
       if (data is! List) throw Exception('只有列表数据才能导出 CSV。');
-      result = const ListToCsvConverter().convert(data);
+      final rows = data.map<List<dynamic>?>((row) {
+        if (row is List) return List<dynamic>.from(row);
+        return null;
+      }).toList();
+      result = const ListToCsvConverter().convert(rows);
     } else if (t == 'yaml') {
       result = _simpleYaml(data);
     } else if (t == 'xml') {
