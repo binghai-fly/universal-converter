@@ -59,13 +59,18 @@ class _ConverterHomeState extends State<ConverterHome> {
     final ext = p.extension(name);
     final stem = p.basenameWithoutExtension(name);
     var i = 1;
-    while (File(p.join(dir.path, '$stem ($i)$ext')).existsSync()) i++;
+    while (File(p.join(dir.path, '$stem ($i)$ext')).existsSync()) {
+      i++;
+    }
     return File(p.join(dir.path, '$stem ($i)$ext'));
   }
 
   Future<void> _convert() async {
     if (_files.isEmpty) return;
-    setState(() { _busy = true; _progress = 0; });
+    setState(() {
+      _busy = true;
+      _progress = 0;
+    });
     try {
       final out = await _outputDir();
       for (var i = 0; i < _files.length; i++) {
@@ -89,9 +94,13 @@ class _ConverterHomeState extends State<ConverterHome> {
         _history.insert(0, '${input.name} → ${p.basename(output.path)}');
         setState(() => _progress = (i + 1) / _files.length);
       }
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('转换完成。')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('转换完成。')));
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -202,7 +211,16 @@ class _ConverterHomeState extends State<ConverterHome> {
       body: ListView(padding: const EdgeInsets.all(16), children: [
         FilledButton.icon(onPressed: _busy ? null : _pickFiles, icon: const Icon(Icons.add), label: const Text('选择文件')),
         const SizedBox(height: 12),
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: DropdownButtonFormField<String>(value: _target, items: targets.map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(), onChanged: _busy ? null : (v) => setState(() => _target = v!)))),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: DropdownButtonFormField<String>(
+              initialValue: _target,
+              items: targets.map((x) => DropdownMenuItem(value: x, child: Text(x))).toList(),
+              onChanged: _busy ? null : (v) => setState(() => _target = v!),
+            ),
+          ),
+        ),
         const SizedBox(height: 12),
         ..._files.map((f) => ListTile(leading: const Icon(Icons.insert_drive_file), title: Text(f.name), trailing: IconButton(onPressed: _busy ? null : () => setState(() => _files.remove(f)), icon: const Icon(Icons.close)))),
         if (_busy) ...[LinearProgressIndicator(value: _progress), const SizedBox(height: 8), Text('${(_progress * 100).round()}%')],
