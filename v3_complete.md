@@ -1,0 +1,1 @@
+Universal Converter 3.0 implementation is available in app_v3.py. It provides drag-and-drop input, batch conversion, output directory selection, collision-safe output names, progress reporting, and session history.
