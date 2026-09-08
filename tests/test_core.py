@@ -39,3 +39,25 @@ def test_zip_tar_conversion(tmp_path):
         z.write(payload, "hello.txt")
     convert(src, dst)
     assert dst.exists()
+
+
+def test_pdf_to_docx_editable(tmp_path):
+    import fitz
+    from docx import Document
+
+    src = tmp_path / "sample.pdf"
+    dst = tmp_path / "sample.docx"
+    pdf = fitz.open()
+    page = pdf.new_page(width=595, height=842)
+    page.insert_text((72, 90), "Universal Converter PDF Test", fontsize=18)
+    page.insert_text((72, 125), "This text should remain editable in DOCX.", fontsize=11)
+    pdf.save(src)
+    pdf.close()
+
+    convert(src, dst)
+    assert dst.exists()
+    assert dst.stat().st_size > 0
+    doc = Document(dst)
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Universal Converter PDF Test" in text
+    assert "editable in DOCX" in text
