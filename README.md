@@ -6,36 +6,36 @@
 
 - **文本/数据**：TXT、MD、CSV、JSON、YAML、XML
 - **图片**：PNG、JPG/JPEG、WEBP、BMP、TIFF/TIF、GIF
-- **PDF**：常见图片 → PDF、PDF 首页 → 图片
+- **PDF**：图片 → PDF、PDF 首页 → 图片、**PDF → 可编辑 DOCX**
+- **PDF → DOCX**：重点功能。对文字型 PDF 提取文字块、字体大小/样式、图片，并尝试识别 PDF 表格为可编辑 Word 表格；每个 PDF 页面独立对应 Word 页面，尽量保留原始页面尺寸和版式。
 - **Office**：DOC/DOCX、XLS/XLSX、PPT/PPTX、ODT/ODS/ODP、RTF（依赖 LibreOffice）
 - **音视频**：MP3、WAV、FLAC、AAC、OGG、M4A、OPUS、MP4、MKV、AVI、MOV、WEBM、MPEG、MPG、M4V（依赖 FFmpeg）
 - **压缩包**：ZIP、TAR、TAR.GZ/TGZ、TAR.BZ2、TAR.XZ
 
-> “市面上大部分格式”不代表所有格式都能无损互转。Office 和音视频格式由 LibreOffice / FFmpeg 提供能力，复杂 PDF、受 DRM 保护的媒体、专业设计文件等仍可能需要专用软件。
+> PDF → DOCX 是“可编辑重建”，不是简单把 PDF 页面截图塞进 Word。复杂排版、特殊字体、浮动对象和扫描件仍可能与原 PDF 存在差异。扫描 PDF 的 OCR 计划在后续版本加入。
 
-## 3.0 Windows Office 依赖自动化
+## PDF → DOCX 设计
 
-Windows 版现在会自动检测 LibreOffice，不要求用户手动把 `soffice` 加入 PATH。
+转换器会优先使用 PyMuPDF 分析 PDF：
 
-如果未安装 LibreOffice，程序提供：
+1. 读取每一页的文字块和字体信息
+2. 保留文字大小、粗体、斜体和水平位置
+3. 提取 PDF 内嵌图片并写入 DOCX
+4. 尝试识别 PDF 表格并生成真正可编辑的 Word 表格
+5. 按 PDF 页面尺寸创建 Word 页面并分页
+6. 对没有可提取文字的页面保留页面视觉内容，避免内容直接丢失
 
-- **重新检测**：搜索 PATH、Program Files、LocalAppData 和常见用户安装目录
-- **自动安装 LibreOffice**：在 Windows 上调用 WinGet 安装 `TheDocumentFoundation.LibreOffice`；安装过程在后台线程执行，避免冻结界面
-- **官方安装页**：如果电脑没有 WinGet，直接打开 LibreOffice 官方下载页面
-- Office 转换失败时，会给出明确的依赖提示
+当前版本重点优化**文字型 PDF**；扫描件 OCR 不属于当前版本的承诺能力。
+
+## Windows Office 依赖自动化
+
+Windows 版会自动检测 LibreOffice，不要求用户手动把 `soffice` 加入 PATH。
+
+如果未安装 LibreOffice，程序提供重新检测、WinGet 自动安装和官方安装页入口。安装过程在后台线程执行，避免冻结界面。
 
 ### 注意
 
-自动安装需要 Windows 的 **WinGet / App Installer**。程序不会把 LibreOffice 二进制文件打进 EXE，因此不会因为捆绑第三方组件而让 EXE 体积大幅增加。首次安装仍需要网络连接，并可能受到 Windows 管理员策略限制。
-
-## 2.0 改进
-
-- 支持**拖拽添加文件**
-- 支持批量转换，并改为**单任务队列**，减少并发转换导致的 CPU/RAM 峰值
-- 自动避免覆盖已有输出文件，例如 `photo (1).jpg`
-- 增加 XML 输出和 ZIP/TAR 系列互转
-- 增强错误提示、超时保护和输入/输出相同文件检查
-- GitHub Actions 自动运行测试
+自动安装需要 Windows 的 **WinGet / App Installer**。程序不会把 LibreOffice 二进制文件打进 EXE。首次安装仍需要网络连接，并可能受到 Windows 管理员策略限制。
 
 ## 安装
 
@@ -61,7 +61,9 @@ python app.py
 
 ### 外部依赖
 
-- **LibreOffice**：Office 格式互转需要。Windows 版会自动检测并可通过 WinGet 一键安装。
+- **python-docx**：生成可编辑 DOCX，PDF → DOCX 核心依赖。
+- **PyMuPDF**：PDF 解析、文字/图片/表格提取。
+- **LibreOffice**：其他 Office 格式互转需要。Windows 版会自动检测并可通过 WinGet 一键安装。
 - **FFmpeg**：音视频转换需要，并将 `ffmpeg` 加入 PATH。
 
 ## Windows EXE
@@ -72,6 +74,10 @@ pyinstaller --noconfirm --windowed --name UniversalConverter app_v3.py
 ```
 
 项目的 GitHub Actions 会在 `v*.*.*` Tag 上自动构建 Windows x64 ZIP 并发布 GitHub Release。
+
+## 测试
+
+CI 包含 PDF → DOCX 回归测试，验证生成的 DOCX 可以被 `python-docx` 打开，并且 PDF 中的文字能够作为可编辑文本读取。
 
 ## 项目结构
 
@@ -93,10 +99,11 @@ universal-converter/
 
 ## 后续路线
 
-1. Windows 一键安装包 / EXE
-2. 自动检测输入格式并推荐可用目标格式
-3. PDF 多页批量图片导出
+1. **PDF → DOCX 版式继续优化**：段落间距、表格位置、页眉页脚、字体映射
+2. 扫描 PDF OCR → DOCX
+3. PDF 多页图片导出
 4. Office → PDF 的专用预览和错误诊断
 5. 转换历史、日志和取消任务
-6. 插件式 converter adapter，方便加入 CAD、电子书等专业格式
-7. iPhone + Android 本地转换 App
+6. 自动检测输入格式并推荐目标格式
+7. 插件式 converter adapter，方便加入 CAD、电子书等专业格式
+8. iPhone + Android 本地转换 App
