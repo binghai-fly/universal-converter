@@ -1,0 +1,1 @@
+3.0 core files have been staged directly on main. See README.md and README_V3.md for usage. External LibreOffice and FFmpeg remain optional runtime dependencies for Office and media conversion.
