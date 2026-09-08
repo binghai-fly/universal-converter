@@ -15,6 +15,8 @@ import fitz
 import yaml
 from PIL import Image
 
+from .dependencies import find_soffice
+
 
 TEXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".xml"}
 IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif", ".gif"}
@@ -29,7 +31,7 @@ ALL_FORMATS = sorted(TEXT | IMAGES | OFFICE | MEDIA | ARCHIVES | {".pdf"})
 
 
 def format_name(path: Path) -> str:
-    """Return a normalized extension, including .tgz."""
+    """Return a normalized extension, including multi-part archives."""
     name = path.name.lower()
     if name.endswith(".tar.gz"):
         return ".tar.gz"
@@ -57,7 +59,6 @@ def convert(src: Path, dst: Path) -> None:
     if s == d:
         shutil.copy2(src, dst)
         return
-
     if s in IMAGES and (d in IMAGES or d == ".pdf"):
         image_convert(src, dst)
         return
@@ -117,7 +118,6 @@ def _read_text_data(src: Path):
 def text_convert(src: Path, dst: Path) -> None:
     obj = _read_text_data(src)
     suffix = dst.suffix.lower()
-
     if suffix == ".json":
         dst.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
     elif suffix in {".yaml", ".yml"}:
@@ -178,18 +178,12 @@ def _fill_xml(parent: ET.Element, value) -> None:
         parent.text = str(value)
 
 
-def _find_program(*names: str) -> str | None:
-    for name in names:
-        path = shutil.which(name)
-        if path:
-            return path
-    return None
-
-
 def office_convert(src: Path, dst: Path) -> None:
-    soffice = _find_program("soffice", "libreoffice")
+    soffice = find_soffice()
     if not soffice:
-        raise RuntimeError("Office 格式转换需要 LibreOffice，并确保 soffice 在 PATH 中。")
+        raise RuntimeError(
+            "未检测到 LibreOffice。请在“Office 依赖”中自动安装，或手动安装后重试。"
+        )
     with tempfile.TemporaryDirectory() as td:
         cmd = [soffice, "--headless", "--convert-to", dst.suffix.lstrip("."), "--outdir", td, str(src)]
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -201,7 +195,7 @@ def office_convert(src: Path, dst: Path) -> None:
 
 
 def ffmpeg_convert(src: Path, dst: Path) -> None:
-    ffmpeg = _find_program("ffmpeg")
+    ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("音视频转换需要 FFmpeg，并确保 ffmpeg 在 PATH 中。")
     p = subprocess.run(
