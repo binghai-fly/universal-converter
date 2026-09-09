@@ -59,6 +59,17 @@ def _pdf_span_run_xml(span: dict) -> str:
     return f'<w:r><w:rPr>{props}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>'
 
 
+def _line_alignment(line: dict, page_width_pt: float) -> str:
+    """Infer alignment conservatively; long body lines should never become centered."""
+    x0, _, x1, _ = (float(v) for v in line["bbox"])
+    width = max(0.0, x1 - x0)
+    page_center = page_width_pt / 2.0
+    line_center = (x0 + x1) / 2.0
+    if width < page_width_pt * 0.55 and abs(line_center - page_center) <= 14.0:
+        return "center"
+    return "left"
+
+
 def _add_pdf_textbox(paragraph, line: dict, shape_id: int, page_width_pt: float) -> None:
     spans = line.get("spans", [])
     if not spans:
@@ -68,18 +79,17 @@ def _add_pdf_textbox(paragraph, line: dict, shape_id: int, page_width_pt: float)
         return
 
     x0, y0, x1, y1 = (float(v) for v in line["bbox"])
-    width = max(5.0, x1 - x0 + 3.0)
-    height = max(14.0, y1 - y0 + 8.0)
-    center = (x0 + x1) / 2.0
-    align = "center" if abs(center - page_width_pt / 2.0) < page_width_pt * 0.08 else "left"
+    width = max(8.0, x1 - x0 + 2.0)
+    height = max(14.0, y1 - y0 + 3.5)
+    align = _line_alignment(line, page_width_pt)
 
     xml = f'''<w:pict {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml">
       <v:shape id="pdfText{shape_id}" type="#_x0000_t202"
-        style="position:absolute;margin-left:{x0 - 1:.2f}pt;margin-top:{y0 - 1:.2f}pt;
+        style="position:absolute;margin-left:{x0:.2f}pt;margin-top:{y0 - 0.5:.2f}pt;
         width:{width:.2f}pt;height:{height:.2f}pt;z-index:2;mso-wrap-style:none;
         mso-position-horizontal-relative:page;mso-position-vertical-relative:page"
         stroked="f" filled="f">
-        <v:textbox style="mso-fit-shape-to-text:t;mso-margin-left:0;mso-margin-right:0;
+        <v:textbox style="mso-fit-shape-to-text:f;mso-margin-left:0;mso-margin-right:0;
         mso-margin-top:0;mso-margin-bottom:0">
           <w:txbxContent>
             <w:p>
@@ -96,17 +106,18 @@ def _add_pdf_textbox(paragraph, line: dict, shape_id: int, page_width_pt: float)
     paragraph.add_run()._r.append(parse_xml(xml))
 
 
-def _redacted_page_png(page: fitz.Page, line_rects: list[tuple[float, float, float, float]], dpi: int = 150) -> bytes:
+def _redacted_page_png(page: fitz.Page, line_rects: list[tuple[float, float, float, float]], dpi: int = 180) -> bytes:
+    """Remove PDF text only; preserve lines, borders, drawings, images and signatures."""
     work = fitz.open()
     try:
         new_page = work.new_page(width=page.rect.width, height=page.rect.height)
         new_page.show_pdf_page(new_page.rect, page.parent, page.number)
         for raw in line_rects:
             rect = fitz.Rect(raw)
-            rect.x0 -= 0.6
-            rect.y0 -= 0.6
-            rect.x1 += 0.6
-            rect.y1 += 0.6
+            rect.x0 -= 0.35
+            rect.y0 -= 0.35
+            rect.x1 += 0.35
+            rect.y1 += 0.35
             new_page.add_redact_annot(rect, fill=None)
         if line_rects:
             new_page.apply_redactions(images=0, graphics=0, text=0)
@@ -117,11 +128,12 @@ def _redacted_page_png(page: fitz.Page, line_rects: list[tuple[float, float, flo
 
 
 def convert_pdf_to_docx(src: Path, dst: Path) -> None:
-    """Create a visually stable DOCX with editable text overlays.
+    """Convert PDF to a visually stable DOCX with editable text overlays.
 
-    The original PDF page is preserved as a high-resolution background after
-    text removal. Extracted PDF text is reconstructed as editable Word text
-    boxes at the original page coordinates, preserving fixed-form layouts.
+    The source page is rendered as a high-resolution background with text removed.
+    Each extracted PDF line is reconstructed as an editable Word text box at the
+    original page coordinates. Alignment is conservative so long body lines stay
+    left-aligned while short centered headings remain centered.
     """
     pdf = fitz.open(src)
     try:
