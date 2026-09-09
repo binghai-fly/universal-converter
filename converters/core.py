@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import json
 import shutil
 import subprocess
@@ -16,6 +17,8 @@ import fitz
 import yaml
 from PIL import Image
 from docx import Document
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 from docx.enum.section import WD_SECTION
 from docx.shared import Inches, Pt
 
@@ -80,129 +83,148 @@ def pdf_to_image(src: Path, dst: Path) -> None:
 
 
 def _pdf_font_name(span: dict) -> str:
-    name = span.get("font", "Arial")
-    if "+" in name: name = name.split("+", 1)[-1]
-    return name or "Arial"
+    name = span.get("font", "Microsoft YaHei")
+    if "+" in name:
+        name = name.split("+", 1)[-1]
+    mapping = {
+        "HarmonyOS_Sans_SC": "Microsoft YaHei",
+        "NotoSerifCJKjp-Regular": "SimSun",
+        "NotoSerifCJKsc-Regular": "SimSun",
+        "SourceHanSansCN-Regular": "Microsoft YaHei",
+    }
+    return mapping.get(name, name or "Microsoft YaHei")
 
 
-def _add_pdf_text_block(docx: Document, block: dict, page_width_pt: float) -> None:
-    lines = []
-    for line in block.get("lines", []):
-        spans = line.get("spans", [])
-        if spans: lines.append((line, spans))
-    if not lines: return
-    x0, y0, x1, y1 = block["bbox"]
-    p = docx.add_paragraph()
-    p.paragraph_format.left_indent = Inches(max(0, x0) / 72)
-    p.paragraph_format.space_before = Pt(max(0, y0) * 72 / page_width_pt * 0)  # reset; page spacing is handled by line geometry
-    p.paragraph_format.space_after = Pt(0)
-    p.paragraph_format.line_spacing = 1.0
-    for li, (line, spans) in enumerate(lines):
-        if li:
-            p.add_run().add_break()
-        for span in spans:
-            text = span.get("text", "")
-            if not text: continue
-            run = p.add_run(text)
-            run.font.name = _pdf_font_name(span)
-            size = float(span.get("size", 10) or 10)
-            run.font.size = Pt(max(5, min(size, 72)))
-            flags = int(span.get("flags", 0))
-            run.bold = bool(flags & 16)
-            run.italic = bool(flags & 2)
+def _pdf_span_run_xml(span: dict) -> str:
+    text = html.escape(span.get("text", ""), quote=False)
+    if not text:
+        return ""
+    size = float(span.get("size", 10) or 10)
+    size = max(5, min(size, 72))
+    font = html.escape(_pdf_font_name(span), quote=True)
+    flags = int(span.get("flags", 0))
+    # char_flags is not a reliable bold/italic indicator across embedded CJK fonts.
+    bold = bool(flags & 16)
+    italic = bool(flags & 2)
+    props = (
+        f'<w:rFonts w:ascii="{font}" w:hAnsi="{font}" w:eastAsia="{font}"/>'
+        f'<w:sz w:val="{round(size * 2)}"/><w:szCs w:val="{round(size * 2)}"/>'
+        + ("<w:b/>" if bold else "")
+        + ("<w:i/>" if italic else "")
+    )
+    return f'<w:r><w:rPr>{props}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>'
 
 
-def _add_pdf_image_block(docx: Document, block: dict, page_width_pt: float) -> None:
-    data = block.get("image")
-    if not data: return
-    x0, y0, x1, y1 = block["bbox"]
-    width_pt = max(1, x1 - x0)
-    max_width_pt = max(72, page_width_pt - x0 - 18)
-    width_pt = min(width_pt, max_width_pt)
-    p = docx.add_paragraph()
-    p.paragraph_format.left_indent = Inches(max(0, x0) / 72)
-    p.paragraph_format.space_after = Pt(0)
-    try:
-        p.add_run().add_picture(BytesIO(data), width=Inches(width_pt / 72))
-    except Exception:
+def _add_pdf_textbox(paragraph, block: dict, page_width_pt: float, shape_id: int) -> None:
+    """Add an absolutely positioned, editable Word text box for one PDF text block."""
+    x0, y0, x1, y1 = (float(v) for v in block["bbox"])
+    width = max(8.0, x1 - x0 + 2.0)
+    height = max(8.0, y1 - y0 + 4.0)
+    line_xml = []
+    for line_index, line in enumerate(block.get("lines", [])):
+        if line_index:
+            line_xml.append("<w:br/>")
+        for span in line.get("spans", []):
+            line_xml.append(_pdf_span_run_xml(span))
+    if not line_xml:
         return
 
+    center = (x0 + x1) / 2.0
+    align = "center" if abs(center - page_width_pt / 2.0) < page_width_pt * 0.08 else "left"
+    content = "".join(line_xml)
+    xml = f'''<w:pict {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml">
+      <v:shape id="pdfText{shape_id}" type="#_x0000_t202"
+        style="position:absolute;left:{x0:.2f}pt;top:{y0:.2f}pt;width:{width:.2f}pt;height:{height:.2f}pt;z-index:2;mso-wrap-style:none"
+        stroked="f" filled="f">
+        <v:textbox inset="0pt,0pt,0pt,0pt">
+          <w:txbxContent>
+            <w:p>
+              <w:pPr><w:jc w:val="{align}"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>
+              {content}
+            </w:p>
+          </w:txbxContent>
+        </v:textbox>
+      </v:shape>
+    </w:pict>'''
+    paragraph.add_run()._r.append(parse_xml(xml))
 
-def _table_bbox(table) -> tuple[float, float, float, float]:
-    bbox = getattr(table, "bbox", (0, 0, 0, 0))
-    return tuple(float(x) for x in bbox)
 
-
-def _overlaps(a, b) -> bool:
-    ax0, ay0, ax1, ay1 = a; bx0, by0, bx1, by1 = b
-    return not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0)
-
-
-def _add_pdf_table(docx: Document, table) -> None:
-    data = table.extract()
-    if not data: return
-    rows = len(data); cols = max((len(r) for r in data), default=0)
-    if not rows or not cols: return
-    wt = docx.add_table(rows=rows, cols=cols)
-    wt.style = "Table Grid"
-    for r, row in enumerate(data):
-        for c, value in enumerate(row):
-            wt.cell(r, c).text = "" if value is None else str(value)
-    docx.add_paragraph().paragraph_format.space_after = Pt(0)
+def _redacted_page_png(page: fitz.Page, text_blocks: list[dict], dpi: int = 150) -> bytes:
+    """Render the page after removing only PDF text, keeping lines, drawings and images."""
+    work = fitz.open()
+    try:
+        new_page = work.new_page(width=page.rect.width, height=page.rect.height)
+        new_page.show_pdf_page(new_page.rect, page.parent, page.number)
+        for block in text_blocks:
+            rect = fitz.Rect(block["bbox"])
+            rect.x0 -= 0.7; rect.y0 -= 0.7; rect.x1 += 0.7; rect.y1 += 0.7
+            new_page.add_redact_annot(rect, fill=None)
+        if text_blocks:
+            new_page.apply_redactions(images=0, graphics=0, text=0)
+        pix = new_page.get_pixmap(dpi=dpi, alpha=False)
+        return pix.tobytes("png")
+    finally:
+        work.close()
 
 
 def pdf_to_docx(src: Path, dst: Path) -> None:
-    """Convert a text-based PDF into an editable DOCX while approximating page layout.
+    """Convert PDF to a layout-preserving, editable DOCX.
 
-    Text spans keep font size/style and horizontal position; images are embedded and
-    detected PDF tables become editable Word tables when PyMuPDF can detect them.
-    Scanned/image-only pages are preserved as page images so the visual layout is not lost.
-    OCR is intentionally left for a later release.
+    Each PDF page becomes a fixed-size Word section. The original page is used
+    as a background after PDF text is redacted, preserving drawings, rules,
+    check marks and signatures. Extracted text is then placed back as editable
+    absolute-positioned Word text boxes. This is substantially more faithful
+    for forms and scanned/hybrid PDFs than normal paragraph-flow conversion.
     """
     pdf = fitz.open(src)
     try:
-        if len(pdf) == 0: raise ValueError("PDF 没有页面")
+        if len(pdf) == 0:
+            raise ValueError("PDF 没有页面")
         docx = Document()
-        first = True
-        for page in pdf:
-            if not first:
+        for page_index, page in enumerate(pdf):
+            if page_index:
                 section = docx.add_section(WD_SECTION.NEW_PAGE)
             else:
                 section = docx.sections[0]
-                first = False
             rect = page.rect
             section.page_width = Inches(rect.width / 72)
             section.page_height = Inches(rect.height / 72)
-            section.top_margin = Inches(0.15)
-            section.bottom_margin = Inches(0.15)
-            section.left_margin = Inches(0.15)
-            section.right_margin = Inches(0.15)
+            section.top_margin = Inches(0)
+            section.bottom_margin = Inches(0)
+            section.left_margin = Inches(0)
+            section.right_margin = Inches(0)
+            section.header_distance = Inches(0)
+            section.footer_distance = Inches(0)
 
             blocks = page.get_text("dict").get("blocks", [])
-            text_blocks = [b for b in blocks if b.get("type") == 0 and any(s.get("text", "").strip() for l in b.get("lines", []) for s in l.get("spans", []))]
-            image_blocks = [b for b in blocks if b.get("type") == 1 and b.get("image")]
-            try:
-                tables = list(page.find_tables().tables)
-            except Exception:
-                tables = []
-            table_boxes = [_table_bbox(t) for t in tables]
-            if not text_blocks and not image_blocks and not tables:
-                pix = page.get_pixmap(dpi=150, alpha=False)
-                p = docx.add_paragraph()
-                p.add_run().add_picture(BytesIO(pix.tobytes("png")), width=Inches(min(rect.width, 540) / 72))
-                continue
-            items = []
-            for b in text_blocks:
-                if not any(_overlaps(tuple(b["bbox"]), tb) for tb in table_boxes): items.append((b["bbox"][1], 0, b))
-            for b in image_blocks: items.append((b["bbox"][1], 1, b))
-            for t in tables: items.append((_table_bbox(t)[1], 2, t))
-            items.sort(key=lambda x: (x[0], x[1]))
-            for _, kind, obj in items:
-                if kind == 0: _add_pdf_text_block(docx, obj, rect.width)
-                elif kind == 1: _add_pdf_image_block(docx, obj, rect.width)
-                else: _add_pdf_table(docx, obj)
-        if len(docx.paragraphs) == 0:
-            raise ValueError("PDF 未提取到可转换内容")
+            text_blocks = [
+                b for b in blocks
+                if b.get("type") == 0
+                and any(s.get("text", "").strip() for l in b.get("lines", []) for s in l.get("spans", []))
+            ]
+
+            bg_data = _redacted_page_png(page, text_blocks, dpi=150)
+            paragraph = docx.add_paragraph()
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.paragraph_format.line_spacing = 0.01
+
+            image_run = paragraph.add_run()
+            image_run.add_picture(BytesIO(bg_data), width=Inches(rect.width / 72))
+            rid = image_run._r.xpath('.//a:blip/@r:embed')[0]
+            image_run._r.getparent().remove(image_run._r)
+            bg_xml = f'''<w:pict {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <v:shape id="pdfPage{page_index}" type="#_x0000_t75"
+                style="position:absolute;left:0pt;top:0pt;width:{rect.width:.2f}pt;height:{rect.height:.2f}pt;z-index:-1;mso-wrap-style:none"
+                stroked="f" filled="f">
+                <v:imagedata r:id="{rid}" o:title="PDF page"/>
+              </v:shape>
+            </w:pict>'''
+            paragraph.add_run()._r.append(parse_xml(bg_xml))
+
+            for shape_id, block in enumerate(text_blocks, start=1):
+                _add_pdf_textbox(paragraph, block, rect.width, shape_id)
+
         docx.save(dst)
     finally:
         pdf.close()
