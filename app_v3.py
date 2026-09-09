@@ -32,6 +32,51 @@ FORMATS = [
     ("压缩包", ["zip", "tar", "tar.gz", "tgz", "tar.bz2", "tar.xz"]),
 ]
 ALL_FORMATS = [x for _, xs in FORMATS for x in xs]
+FORMAT_LABELS = {
+    "txt": "TXT  ·  文本",
+    "md": "Markdown 文档",
+    "csv": "CSV  ·  表格数据",
+    "json": "JSON  ·  数据",
+    "yaml": "YAML  ·  数据",
+    "xml": "XML  ·  数据",
+    "png": "PNG  ·  图片",
+    "jpg": "JPG  ·  图片",
+    "jpeg": "JPEG  ·  图片",
+    "webp": "WEBP  ·  图片",
+    "bmp": "BMP  ·  图片",
+    "tiff": "TIFF  ·  图片",
+    "gif": "GIF  ·  图片",
+    "pdf": "PDF  ·  PDF 文档",
+    "doc": "DOC  ·  Word 文档（旧格式）",
+    "docx": "DOCX  ·  Word 文档",
+    "xls": "XLS  ·  Excel 表格（旧格式）",
+    "xlsx": "XLSX  ·  Excel 表格",
+    "ppt": "PPT  ·  PowerPoint 演示文稿（旧格式）",
+    "pptx": "PPTX  ·  PowerPoint 演示文稿",
+    "odt": "ODT  ·  文本文档",
+    "ods": "ODS  ·  电子表格",
+    "odp": "ODP  ·  演示文稿",
+    "rtf": "RTF  ·  富文本",
+    "mp3": "MP3  ·  音频",
+    "wav": "WAV  ·  音频",
+    "flac": "FLAC  ·  音频",
+    "aac": "AAC  ·  音频",
+    "ogg": "OGG  ·  音频",
+    "m4a": "M4A  ·  音频",
+    "mp4": "MP4  ·  视频",
+    "mkv": "MKV  ·  视频",
+    "avi": "AVI  ·  视频",
+    "mov": "MOV  ·  视频",
+    "webm": "WEBM  ·  视频",
+    "mpeg": "MPEG  ·  视频",
+    "mpg": "MPG  ·  视频",
+    "zip": "ZIP  ·  压缩包",
+    "tar": "TAR  ·  压缩包",
+    "tar.gz": "TAR.GZ  ·  压缩包",
+    "tgz": "TGZ  ·  压缩包",
+    "tar.bz2": "TAR.BZ2  ·  压缩包",
+    "tar.xz": "TAR.XZ  ·  压缩包",
+}
 
 
 def suffix(path: Path) -> str:
@@ -183,7 +228,7 @@ class App(QWidget):
         self.format = QComboBox()
         for group, xs in FORMATS:
             for ext in xs:
-                self.format.addItem(f"{ext.upper()}  ·  {group}", ext)
+                self.format.addItem(FORMAT_LABELS.get(ext, ext.upper()), ext)
         options.addWidget(self.format, 1)
         self.same_ext = QCheckBox("允许同格式复制")
         self.same_ext.setChecked(False)
