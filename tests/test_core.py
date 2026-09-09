@@ -62,9 +62,9 @@ def test_pdf_to_docx_preserves_editable_text_and_page_layout(tmp_path):
     assert dst.exists()
     assert dst.stat().st_size > 0
 
-    # Text lives in editable Word text boxes rather than being flattened into
-    # the page image. Check the generated OOXML directly because python-docx's
-    # high-level paragraph API does not expose VML text-box contents.
+    # Text is stored in editable Word text boxes, not flattened into the image.
+    # python-docx does not expose VML text-box contents through paragraphs, so
+    # inspect the OOXML directly.
     with ZipFile(dst) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     assert "PDF layout test" in xml
@@ -72,7 +72,7 @@ def test_pdf_to_docx_preserves_editable_text_and_page_layout(tmp_path):
     assert "pdfText1" in xml
     assert "pdfPage0" in xml
 
-    # The resulting document still has the source page size.
+    # The document keeps the source page size.
     doc = Document(dst)
     section = doc.sections[0]
     assert round(section.page_width.inches, 1) == round(595 / 72, 1)
