@@ -1,3 +1,6 @@
+from pathlib import Path
+from zipfile import ZipFile
+
 from converters import convert
 
 
@@ -41,7 +44,7 @@ def test_zip_tar_conversion(tmp_path):
     assert dst.exists()
 
 
-def test_pdf_to_docx_editable(tmp_path):
+def test_pdf_to_docx_preserves_editable_text_and_page_layout(tmp_path):
     import fitz
     from docx import Document
 
@@ -49,7 +52,8 @@ def test_pdf_to_docx_editable(tmp_path):
     dst = tmp_path / "sample.docx"
     pdf = fitz.open()
     page = pdf.new_page(width=595, height=842)
-    page.insert_text((72, 90), "Universal Converter PDF Test", fontsize=18)
+    page.draw_line((72, 200), (523, 200), color=(0, 0, 0), width=1)
+    page.insert_text((72, 90), "PDF layout test", fontsize=18)
     page.insert_text((72, 125), "This text should remain editable in DOCX.", fontsize=11)
     pdf.save(src)
     pdf.close()
@@ -57,7 +61,19 @@ def test_pdf_to_docx_editable(tmp_path):
     convert(src, dst)
     assert dst.exists()
     assert dst.stat().st_size > 0
+
+    # Text lives in editable Word text boxes rather than being flattened into
+    # the page image. Check the generated OOXML directly because python-docx's
+    # high-level paragraph API does not expose VML text-box contents.
+    with ZipFile(dst) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert "PDF layout test" in xml
+    assert "editable in DOCX" in xml
+    assert "pdfText1" in xml
+    assert "pdfPage0" in xml
+
+    # The resulting document still has the source page size.
     doc = Document(dst)
-    text = "\n".join(p.text for p in doc.paragraphs)
-    assert "Universal Converter PDF Test" in text
-    assert "editable in DOCX" in text
+    section = doc.sections[0]
+    assert round(section.page_width.inches, 1) == round(595 / 72, 1)
+    assert round(section.page_height.inches, 1) == round(842 / 72, 1)
