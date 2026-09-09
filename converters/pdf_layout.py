@@ -59,7 +59,7 @@ def _pdf_span_run_xml(span: dict) -> str:
     return f'<w:r><w:rPr>{props}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>'
 
 
-def _add_pdf_textbox(paragraph, line: dict, shape_id: int) -> None:
+def _add_pdf_textbox(paragraph, line: dict, shape_id: int, page_width_pt: float) -> None:
     spans = line.get("spans", [])
     if not spans:
         return
@@ -70,9 +70,8 @@ def _add_pdf_textbox(paragraph, line: dict, shape_id: int) -> None:
     x0, y0, x1, y1 = (float(v) for v in line["bbox"])
     width = max(5.0, x1 - x0 + 3.0)
     height = max(14.0, y1 - y0 + 8.0)
-    page_width = float(paragraph._parent.sections[0].page_width.inches * 72)
     center = (x0 + x1) / 2.0
-    align = "center" if abs(center - page_width / 2.0) < page_width * 0.08 else "left"
+    align = "center" if abs(center - page_width_pt / 2.0) < page_width_pt * 0.08 else "left"
 
     xml = f'''<w:pict {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml">
       <v:shape id="pdfText{shape_id}" type="#_x0000_t202"
@@ -120,11 +119,9 @@ def _redacted_page_png(page: fitz.Page, line_rects: list[tuple[float, float, flo
 def convert_pdf_to_docx(src: Path, dst: Path) -> None:
     """Create a visually stable DOCX with editable text overlays.
 
-    The PDF page is preserved as a high-resolution background after its text is
-    redacted. Every extracted PDF text line is then reconstructed as an editable
-    Word text box at its original page coordinates. This keeps tables, borders,
-    signatures, checkboxes, drawings and fixed-form layouts visually stable
-    while allowing the detected text to be edited in Word.
+    The original PDF page is preserved as a high-resolution background after
+    text removal. Extracted PDF text is reconstructed as editable Word text
+    boxes at the original page coordinates, preserving fixed-form layouts.
     """
     pdf = fitz.open(src)
     try:
@@ -178,7 +175,7 @@ def convert_pdf_to_docx(src: Path, dst: Path) -> None:
             paragraph.add_run()._r.append(parse_xml(background_xml))
 
             for shape_id, line in enumerate(lines, start=1 + page_index * 10000):
-                _add_pdf_textbox(paragraph, line, shape_id)
+                _add_pdf_textbox(paragraph, line, shape_id, rect.width)
 
         docx.save(dst)
     finally:
